@@ -2,7 +2,7 @@
 
 ## 系統是什麼
 
-幫 Jessie 處理 Outlook 信件。自動讀信、判斷要不要回、產草稿，Jessie 看完按寄出。
+Outlook 信件。自動讀信、判斷要不要回、產草稿，看完按寄出。
 FastAPI server + Ollama，Windows 客戶端，完全在內網跑。
 
 ---
@@ -52,8 +52,8 @@ ollama create "devstral-small-2:24b" -f Modelfile
 在送進 LLM 之前，rule-based classifier 先判斷要不要處理：
 
 ```python
-# 信是寫給別人的，Jessie 只是 CC
-if greeting_name not in {'jessie', 'jessie chu', '使用者中文名'}:
+# 信是寫給別人的，user 只是 CC
+if greeting_name not in {'user', 'user xxx', '使用者中文名'}:
     return False, 'low'
 
 # Email @mention 別人
@@ -61,7 +61,7 @@ if re.match(r"hi\s+@['\"]?\w.*@\w", first_line, re.I):
     return False, 'low'
 
 # 內部轉發通知
-if '【VSO internal】' in subject:
+if '【XXX internal】' in subject:
     return False, 'low'
 ```
 
@@ -91,7 +91,7 @@ def _is_garbage(text):
     return False
 ```
 
-偵測到垃圾就 fallback 到固定模板（`Hi {name}, 收到，我確認後回覆。`），至少不丟一個爛草稿給 Jessie。
+偵測到垃圾就 fallback 到固定模板（`Hi {name}, 收到，我確認後回覆。`），至少不丟一個爛草稿給 user。
 
 ---
 
