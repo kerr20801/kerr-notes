@@ -13,7 +13,7 @@
 | [infra/](infra/) | VMware ESXi、vCenter、UPS 自動化、DNS、ELK、K8S、Fortigate、Nginx 等基礎設施筆記 |
 | [ai-systems/](ai-systems/) | AI agent 設計、選股系統架構、行為建模 |
 | [dev/](dev/) | Chrome MV3、patch script、踩坑記錄 |
-| [security/](security/) | 封包分析、威脅偵測、網路安全實戰 |
+| [security/](security/) | 封包分析、威脅偵測、審查偵測、網路安全設計決策 |
 
 ---
 
