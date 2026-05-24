@@ -151,4 +151,53 @@ esxtop  # 進去後按 d 切換到 disk 視圖
 
 ---
 
+---
+
+## 連帶影響：ELK 叢集無故降級
+
+同一個事件裡，ELK 是第一個出症狀的，反而讓排查方向走錯。
+
+### ELK 當時的症狀
+
+- Elasticsearch cluster health 從 green 變 yellow，部分 shard unassigned
+- Kibana 查詢 timeout，Logstash pipeline 開始 backpressure
+- `_nodes/stats` 看到 indexing latency 飆高
+- JVM heap 正常，shard 數量也沒超限
+
+直覺會往 ELK 本身找問題：heap 不夠？shard 太多？mapping 爆炸？都不是。
+
+### 真正的原因
+
+ELK 的 VM 跑在同一個 HDD datastore 上。vCLS EAM 瘋狂寫 checkpoint 把 HDD I/O 打滿，ELK VM 的磁碟寫入被擠掉，Elasticsearch 的 translog flush 跟不上，shard 開始出問題。
+
+```
+EAM checkpoint write 佔滿 HDD I/O
+  → ELK VM 磁碟寫入 latency 暴增
+  → Elasticsearch translog flush 超時
+  → shard 標記為 unassigned
+  → cluster health yellow
+```
+
+Elasticsearch 沒有壞，是底層 VM 的 storage 被別人搶完了。
+
+### 怎麼確認是 storage 層問題
+
+在 ESXi 上跑 `esxtop`，切到 disk 視圖（按 `d`），看 `DAVG`（device average latency）：
+
+- 正常：< 5ms
+- 有問題：> 20ms，甚至 > 100ms
+
+如果 DAVG 異常高，問題不在 Elasticsearch，在 datastore。
+
+### 排查順序建議
+
+ELK 在 VM 上跑、cluster 無故降級時，先確認這幾層再進 Elasticsearch 內部找問題：
+
+1. `esxtop` 確認 datastore latency 正常
+2. vCenter 確認沒有其他 VM 或 service 在大量寫同一個 datastore
+3. EAM log 確認沒有瘋狂重試（`/var/log/vmware/eam/eam.log`）
+4. 都正常才進 `_cluster/health`、`_nodes/stats` 找 Elasticsearch 本身的問題
+
+---
+
 *記錄於 2026-05-19，vSphere 7.x 環境實際排查案例*
