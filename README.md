@@ -10,7 +10,11 @@
 
 | 目錄 | 說明 |
 |------|------|
-| [infra/](infra/) | VMware ESXi、vCenter、UPS 自動化、DNS、ELK、K8S、Fortigate、Nginx 等基礎設施筆記 |
+| [infra/vmware/](infra/vmware/) | vSphere、ESXi、vCenter、Storage vMotion、vCLS |
+| [infra/elk/](infra/elk/) | Elasticsearch、Logstash、Kibana，Docker 部署 |
+| [infra/k8s/](infra/k8s/) | Kubernetes，vSphere 上的 K8S 叢集 |
+| [infra/network/](infra/network/) | DNS、BIND9、Fortigate、NGINX |
+| [infra/service/](infra/service/) | UPS、NUT 及其他服務 |
 | [ai-systems/](ai-systems/) | AI agent 設計、選股系統架構、行為建模 |
 | [dev/](dev/) | Chrome MV3、patch script、踩坑記錄 |
 | [security/](security/) | 封包分析、威脅偵測、審查偵測、網路安全設計決策 |
