@@ -18,6 +18,7 @@
 | [ai-systems/](ai-systems/) | AI agent 設計、選股系統架構、行為建模 |
 | [dev/](dev/) | Chrome MV3、patch script、踩坑記錄 |
 | [security/](security/) | 封包分析、威脅偵測、審查偵測、網路安全設計決策 |
+| [anti-patterns/](anti-patterns)	| 人類行為反模式、技術無法解決的純智障事件與防禦策略|
 
 ---
 
