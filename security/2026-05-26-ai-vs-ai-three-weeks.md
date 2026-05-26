@@ -20,7 +20,7 @@ OpenClaw 是我在另一台隔離 VM 裡跑的 Red Team AI。我叫它龍蝦。
 
 大腦是 Claude Sonnet，工具鏈是 nmap、sqlmap、nuclei（13,060 個 CVE template）、hydra，加上我自己寫的幾個攻擊腳本。它跟 Shield 的關係只有一個原則：**龍蝦只看得到對外介面，不知道 Shield 的任何內部細節。**
 
-5 月 9 日晚上，我給龍蝦一個任務：「打 172.16.32.0/24，找所有安全弱點。」然後我去睡覺。
+5 月 9 日晚上，我給龍蝦一個任務：「打 172.XX.XX.0/24，找所有安全弱點。」然後我去睡覺。
 
 ---
 
@@ -106,7 +106,7 @@ Campaign：Session 1 只做 fingerprint，等 3 小時
 
 ## 然後我發現了更大的問題
 
-5 月 18 日，例行檢查 Shield 狀態，發現 `threats.db` 裡的寫入時間不對。
+5 月 18 日，例行檢查 Shield 狀態，發現 `ai.db` 裡的寫入時間不對。
 
 往前查：**三週，零寫入。**
 
@@ -115,7 +115,7 @@ Campaign：Session 1 只做 fingerprint，等 3 小時
 | 問題 | 真相 |
 |------|------|
 | CatBoost 評分 | ❌ 從未載入（sklearn ABI 版本不一致） |
-| Shield 監控 log | ❌ 指向空檔案（3e7-access.log 是空的） |
+| Shield 監控 log | ❌ 指向空檔案（xxx-access.log 是空的） |
 | ML 封鎖決策 | ❌ 全靠 rule-based fallback |
 
 **我的 ML WAF 跑了三週，ML 從來沒有跑過。**
@@ -129,9 +129,9 @@ Campaign：Session 1 只做 fingerprint，等 3 小時
 重新訓練 CatBoost（在 container 內，F1=1.0），修好 log 路徑，讓龍蝦再打一輪：
 
 ```
-17:32:53  172.16.32.28  sensitive_scan  score=1.00  banned
-17:33:23  172.16.32.28  sensitive_scan  score=1.00  banned
-17:33:53  172.16.32.28  sensitive_scan  score=1.00  banned
+17:32:53  172.XX.XX.28  sensitive_scan  score=1.00  banned
+17:33:23  172.XX.XX.28  sensitive_scan  score=1.00  banned
+17:33:53  172.XX.XX.28  sensitive_scan  score=1.00  banned
 ```
 
 龍蝦的 ban_guard 也回報：
