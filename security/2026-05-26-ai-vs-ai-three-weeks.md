@@ -8,7 +8,7 @@
 
 今年初我在家裡 Lab 部署了 NGINX AI Shield——一套我自己寫的 AI 驅動 WAF，三層 ML 模型叠在 NGINX 前面，分析每一個進來的請求。
 
-訓練資料是公司 IDC 的真實流量，20,000 多筆攻擊樣本。GradientBoosting、RandomForest、IsolationForest，三個模型投票。Shadow 模式跑了幾週，偵測到一堆東西，我心裡很滿意。
+訓練資料是外部 的真實流量，20,000 多筆攻擊樣本。GradientBoosting、RandomForest、IsolationForest，三個模型投票。Shadow 模式跑了幾週，偵測到一堆東西，我心裡很滿意。
 
 然後我想：**讓另一個 AI 來打它，看看到底多強。**
 
