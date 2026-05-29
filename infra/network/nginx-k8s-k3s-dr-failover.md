@@ -7,13 +7,13 @@
 ```
 Client
   ↓
-NGINX (172.16.32.43/.44, Keepalived VIP)
+NGINX (192.168.1.43/.44, Keepalived VIP)
   ↓ proxy_next_upstream
-K8s / Traefik (172.16.32.78:443)   ← 正常流量
+K8s / Traefik (192.168.1.78:443)   ← 正常流量
   ↓ 502/503/504
-K3S (172.16.32.51:443)             ← K8s 掛掉自動切
+K3S (192.168.1.51:443)             ← K8s 掛掉自動切
   ↓ 502/503/504
-Docker DR (172.16.32.28:443)       ← K3S 也掛才到這
+Docker DR (192.168.1.28:443)       ← K3S 也掛才到這
 ```
 
 三個後端用 `proxy_next_upstream` 串起來，nginx 偵測到 upstream 回 5xx 或 timeout 就自動往下一層走，不需要 health check daemon、不需要人工介入。
@@ -25,15 +25,15 @@ Docker DR (172.16.32.28:443)       ← K3S 也掛才到這
 ```nginx
 # upstream 定義三層後端
 upstream k8s_cluster {
-    server 172.16.32.78:443 max_fails=1 fail_timeout=30s;
+    server 192.168.1.78:443 max_fails=1 fail_timeout=30s;
 }
 
 upstream uat_k8s {
-    server 172.16.32.51:443 max_fails=1 fail_timeout=5s;
+    server 192.168.1.51:443 max_fails=1 fail_timeout=5s;
 }
 
 upstream docker_dr {
-    server 172.16.32.28:443 max_fails=1 fail_timeout=5s;
+    server 192.168.1.28:443 max_fails=1 fail_timeout=5s;
 }
 
 server {
