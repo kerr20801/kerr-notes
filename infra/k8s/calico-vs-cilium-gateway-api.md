@@ -99,3 +99,11 @@ Calico 環境最省事的選法：**已有 Traefik 就繼續用 Traefik，它從
 - Cilium 取代 kube-proxy 是可選的（`kubeProxyReplacement: true`），但一旦開了，回頭很麻煩
 - Gateway API 的 CRD 和 controller 版本要對齊，混用不同版本的 CRD 會有奇怪行為
 - 不管選哪個 CNI，NetworkPolicy 的 default-deny 要從一開始就設計好，後期補很痛
+
+---
+
+## 實戰後記
+
+實際跑過 Cilium 一段時間，最終退回 Calico + Ingress（現在改 Gateway API）。原因很單純：環境沒到那個規模，Cilium 的功能幾乎沒用到，但維運複雜度是真實存在的。
+
+**不是 Cilium 不好，是環境決定工具。** 當流量規模、L7 policy 需求、或可觀測性要求真的到位，Cilium 就是對的選擇，這時候硬省才是錯的。技術選型的標準只有一個：需求，不是功能清單。
