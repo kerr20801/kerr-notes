@@ -165,3 +165,4 @@ configure_security() {
 - bash local：config 照常寫，值是空的
 
 這類問題比直接崩潰更難抓，因為你不知道它已經壞了。
+# 結合 fail2ban 驗證是不錯做法不過我沒去做
