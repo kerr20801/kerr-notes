@@ -1,4 +1,4 @@
-# FortiOS 7.6 拿掉了 SSL VPN，我被迫遷到 IPSec —— 順便挖出「隧道通了但什麼都不通」的三種死法
+# FortiOS 7.6 拿掉了 SSL VPN，我被迫遷到 IPSec —— 挖出「隧道通了但什麼都不通」的四種死法
 
 寫於 2026-08-04
 
@@ -6,9 +6,11 @@
 
 FortiOS 7.6 在低階機型（2GB RAM，60F 這類）**移除了 SSL VPN tunnel mode**。官方立場很明確：改用 IPSec。
 
-我的 60F 從 7.4.12 升到 7.6.7，本來以為是例行升版，結果變成一次完整的 VPN 架構遷移。過程中撞到三個「隧道明明建起來了，但就是不通」的情況——**而且三個的根因完全不同，症狀卻長得一模一樣**。
+我的 60F 從 7.4.12 升到 7.6.7，本來以為是例行升版，結果變成一次完整的 VPN 架構遷移。過程中撞到四個「隧道明明建起來了，但就是不通」的情況——**而且四個的根因完全不同，症狀卻長得一模一樣**。
 
 這篇不講「怎麼設定 IPSec VPN」（官方文件寫得很清楚），只講那些**設定看起來完全正確、但實際上不會動**的地方。
+
+如果你只想看一個重點，**看死法一就好**——那個坑跟 FortiGate 一點關係都沒有，任何用 VPN / overlay 網路又有跑 Docker 的環境都會踩到，而且症狀誤導性極強。
 
 > 文中所有 IP、網域已改為範例值。
 
@@ -23,20 +25,112 @@ FortiOS 7.6 在低階機型（2GB RAM，60F 這類）**移除了 SSL VPN tunnel 
 
 **記憶體不升反降**。我原本擔心 2GB 機型跑 7.6 會很緊，結果移除 SSL VPN tunnel 釋出的資源比新版本多吃的還多。設定也全數存活，UTM profile 一個沒掉。
 
-有一件事值得先澄清，因為我自己一開始就搞錯：**7.6 移除的是 SSL VPN 的 tunnel mode，不是整個 SSL VPN**。web mode（瀏覽器 portal）還在。
+### ⚠️ 一個我連續判斷錯兩次的地方：config 物件 ≠ 功能還在
 
-驗證方法比查文件可靠——直接把 config 物件的欄位列出來看：
+這段值得完整寫出來，因為它示範了一個很容易犯的錯。
+
+**第一次判斷（錯）**：升版前我以為「7.6 把 SSL VPN 整個拿掉」。
+
+**第二次判斷（也錯，但錯得比較隱蔽）**：升完後我用 API 列出 config 物件的欄位，發現 tunnel 相關欄位全消失、但 `web-mode` 還在，於是下結論「**只有 tunnel mode 被移除，web portal 還在而且可用**」。
 
 ```bash
+# 我當時用的方法
 curl -sk "$FGT/api/v2/cmdb/vpn.ssl.web/portal/full-access" -H "Authorization: Bearer $TOKEN" \
   | python3 -c "import json,sys; print(sorted(json.load(sys.stdin)['results'][0].keys()))"
 ```
 
-升版後這個物件裡 **tunnel / split / ip-pool 相關欄位全部消失**，但 `web-mode`、`bookmark-group` 都在。欄位在不在，比任何版本說明都準。
+欄位確實是這樣沒錯——但**結論是錯的**。
+
+**實際狀況**（使用者告訴我 CLI 下 `config vpn ssl settings` 是空的，我才回頭驗證）：
+
+| 檢查方式 | 結果 |
+|---|---|
+| API 讀 `vpn.ssl/settings` | `status: enable`, `port: 16080` ← **看起來還開著** |
+| CLI `config vpn ssl settings` | **指令不存在** |
+| 實測 port 是否監聽 | **沒有回應**（內網直連測試，排除 NAT 干擾） |
+
+**功能移除後，CMDB 裡的舊設定值還躺在那裡**——API 讀得到，但 CLI 指令已移除、daemon 不啟動、port 不監聽。那是**孤兒設定，不是啟用中的服務**。
+
+**教訓：判斷一個功能死活，要看 runtime 而不是 config。**
+
+- ❌ 只查 config 物件 / API 回傳值
+- ✅ 測 port 有沒有在聽、CLI 有沒有這個指令、monitor 端點回什麼
+
+這個坑比「功能還在」更危險——因為它會讓你以為某個攻擊面還存在（或還可用），而做出錯誤的風險判斷。我就差點因此建議使用者去關一個**早就沒在跑的服務**。
 
 ---
 
-## 死法一：「Phase 2 不通」其實根本沒壞
+## 死法一：VPN 網段撞到 Docker，回程封包被吃掉
+
+這個跟 FortiGate 無關，但它是我這次踩到**最通用、也最難查**的一個。
+
+症狀：VPN 連上了，但**只有防火牆本身（gateway）ping 得到，內網其他主機全部不通**。
+
+FortiGate 的 log 長這樣：
+
+```
+172.17.100.1 → 10.0.10.21:443   action=timeout   policyid=18   ← GitLab
+172.17.100.1 → 10.0.10.80:53    action=accept    policyid=18   ← DNS
+```
+
+注意這裡：**`action=timeout` 不是被擋**。它的意思是「政策允許、封包已轉發出去，但沒有任何回應回來，session 逾時了」。如果是政策擋掉會是 `action=deny`。
+
+也就是說：封包**去得了、回不來**。
+
+### 根因
+
+我當初把 VPN 客戶端的 IP 池設在 `172.17.100.0/24`。
+
+**Docker 預設 bridge（`docker0`）用的就是 `172.17.0.0/16`。**
+
+於是任何有跑 Docker 的內網主機，收到來自 `172.17.100.x` 的封包後，查路由表發現「這是 docker0 的網段」，就把回應丟進 Docker 橋接裡——**永遠不會送回防火牆**。
+
+```bash
+# 在有 Docker 的內網主機上
+$ ip route get 172.17.100.1
+172.17.100.1 dev docker0 src 172.17.0.1     ← 回程進了 docker0，不是預設閘道
+
+# 換成安全網段後
+$ ip route get 10.99.1.1
+10.99.1.1 via 10.0.10.254 dev eth0          ← 正確走預設閘道
+```
+
+### 為什麼症狀特別誤導
+
+**通不通取決於那台機器有沒有跑 Docker。**
+
+我環境裡的 DNS 伺服器剛好沒裝 Docker，所以 DNS 查詢**看起來是通的**（log 顯示 `accept`，DNS server 上也真的收到查詢），但同一條 VPN 去連 GitLab（有跑 Docker）就 timeout。
+
+一條 VPN、同一個政策、有些服務通有些不通——這種症狀很容易讓人往「政策設錯」「路由缺了」的方向查，但問題根本不在網路設備上，**而在對端主機的本地路由表被第三方軟體悄悄改過**。
+
+### 哪些網段不能用
+
+Docker 的預設位址池（libnetwork 內建）不只 172.17：
+
+```
+172.17.0.0/16
+172.18.0.0/16
+172.19.0.0/16
+172.20.0.0/14     （172.20 ~ 172.23）
+172.24.0.0/14     （172.24 ~ 172.27）
+172.28.0.0/14     （172.28 ~ 172.31）
+192.168.0.0/16
+```
+
+**Docker 會從 172.17 一路配到 172.31，外加 192.168.x。** 它是按順序配的——你今天看 `172.19` 沒被用，不代表安全，只代表還沒輪到。等某人 `docker compose up` 一個新專案就會拿走，**而那時候沒人會把「VPN 不通」跟「昨天新開的 container」聯想在一起**。
+
+| 網段 | 安全嗎 |
+|---|---|
+| `172.16.0.0/16` | ✅ Docker 從 172.17 才開始配 |
+| `172.17` ~ `172.31` | ❌ Docker 預設池 |
+| `192.168.0.0/16` | ❌ 也在池裡 |
+| `10.0.0.0/8` | ✅ Docker 預設完全不碰 |
+
+理論上可以在每台主機的 `/etc/docker/daemon.json` 固定 Docker 的位址池，但那要**每台跑 Docker 的機器都改、都重啟 Docker**（中斷所有 container），新機器還容易漏掉。**直接選一個 Docker 不碰的網段簡單太多**——改 VPN 池只要動一個地方。
+
+---
+
+## 死法二：「Phase 2 不通」其實根本沒壞
 
 我有一條 ADVPN（Auto-Discovery VPN，hub-and-spoke 架構）。升版後的症狀：
 
@@ -106,7 +200,7 @@ end
 
 ---
 
-## 死法二：客戶端相容性才是主戰場
+## 死法三：客戶端相容性才是主戰場
 
 SSL VPN 沒了之後要讓所有裝置改連 IPSec。這時才發現，**限制不在防火牆，在客戶端**。
 
@@ -150,7 +244,7 @@ IPSEC_IKEV2     IKEv2                  ← 原生用戶端
 
 ---
 
-## 死法三：IKEv2 建起來了，但流量是 0
+## 死法四：IKEv2 建起來了，但流量是 0
 
 這是最花時間的一段，因為連續撞到四個**互相獨立**的問題，每修好一個就露出下一個。
 
@@ -267,6 +361,36 @@ curl -sk "$FGT/api/v2/cmdb/vpn.ipsec/phase1-interface?action=schema" -H "Authori
 
 ---
 
+## config 物件還在，不代表功能還在
+
+跟上面那個 API 陷阱是一體兩面：**寫入時 API 會騙你（回 success 但沒寫），讀取時 config 也會騙你（欄位還在但功能已死）**。
+
+功能被韌體移除後，CMDB 裡的舊設定往往不會一起清掉。於是：
+
+```bash
+# API 說服務開著
+$ curl -sk ".../api/v2/cmdb/vpn.ssl/settings" | jq '.results.status, .results.port'
+"enable"
+16080
+
+# 但 CLI 沒有這個指令了，port 也沒在聽
+$ ssh admin@fgt 'config vpn ssl settings'      # → 空的
+$ nc -zv fgt 16080                              # → 沒有回應
+```
+
+**判斷功能死活的正確方法：**
+
+| 方法 | 可信度 |
+|---|---|
+| 測 port 有沒有在監聽 | ✅ 最可靠 |
+| CLI 有沒有這個指令 | ✅ 可靠 |
+| `monitor` 類端點的回應 | 🟡 通常可靠 |
+| `cmdb` config 物件的值 | ❌ **可能是孤兒設定** |
+
+這個坑的危險之處在於**方向**：它會讓你以為某個攻擊面還存在，做出過度的風險判斷；或反過來，以為某個防護還在跑，其實早就沒了。
+
+---
+
 ## 幾個查問題的順手工具
 
 **診斷 VPN，第一個該看的是 `event/vpn` log 的 `reason` 欄位**，比翻 traffic log 有效太多：
@@ -283,6 +407,30 @@ curl -sk "$FGT/api/v2/log/memory/event/vpn?count=400" -H "Authorization: Bearer 
 **兩個會誤導你的陷阱：**
 
 `/api/v2/log/memory/traffic/local` **回傳的其實是 `subtype: forward` 的資料**，不是真正的 local-in 流量。我一度用它來「證明 IKE 封包沒到達」，差點做出完全錯誤的判斷——打到 FortiGate 自己的 IKE 屬於 local-in，那個端點看不到。要看真相請用 `event/vpn` 或 CLI `diagnose debug application ike -1`。
+
+**在 macOS 上不要用 `dig` 診斷 VPN 的 DNS。**
+
+這個我自己踩了，還害使用者以為設定壞掉。`dig` 和 `nslookup` **直接讀 `/etc/resolv.conf`**，繞過 macOS 的 mDNSResponder——而 macOS 的「補充解析器」（supplemental resolver，也就是「這個網域用這台 DNS 查」）就活在那一層。
+
+所以 `dig` 永遠只會顯示本地 DNS，即使系統實際上會把 `example.com` 的查詢導進 VPN。**Linux 上的習慣直接套過來就會誤判。**
+
+正確的工具：
+
+```bash
+# 看解析器設定（會列出所有補充解析器）
+scutil --dns | grep -B2 -A6 "example.com"
+
+# 期待看到：
+#   resolver #8
+#     domain   : example.com
+#     nameserver[0] : 10.0.10.80
+#     reach    : 0x00000002 (Reachable)
+
+# 用系統解析器實際查一次（這才是 App/瀏覽器走的路徑）
+dscacheutil -q host -a name app.example.com
+```
+
+最實際的驗證其實是**直接開瀏覽器**——網頁開得起來就是好的，不管 `dig` 說什麼。
 
 **NAT hairpin 會讓內網測試失真**。在自家 WiFi 上連自家公網 IP，FortiGate 看到的來源是內網位址、客戶端以為在連外網，NAT-T 的位址雜湊對不起來，協商會走偏。**內網測 VPN 失敗不代表真的壞**——而且手機已經在家裡網路上了，本來也不需要 VPN。
 
@@ -324,6 +472,7 @@ Schema 的 `help` 欄位是最可靠的來源——比記憶、比部落格、�
 
 ### 建 dial-up IPSec VPN 時
 
+- [ ] **IP 池避開 Docker 預設範圍**（`172.17`~`172.31`、`192.168.x`）——用 `172.16.x` 或 `10.x`
 - [ ] phase1/phase2 加密參數（**客戶端能力才是限制**，不是伺服器）
 - [ ] **隧道介面 IP** — 手動建的一定要補，Wizard 建的才會自動配
 - [ ] mode-cfg IP 池**不與其他隧道重疊**
@@ -340,6 +489,14 @@ Schema 的 `help` 欄位是最可靠的來源——比記憶、比部落格、�
 2. traffic log 連 deny 都沒有 → 封包沒進防火牆
 3. 有 out 沒 in → 路由 / 回程問題
 4. split tunnel 時，**先確認測試的目標在 split-include 範圍內**——測不在範圍內的目標，0 流量是正常的
+5. **`action=timeout`（不是 deny）+ 只有 gateway 通** → 對端主機的回程路由被搶走，**先查 Docker**：
+   在內網主機上跑 `ip route get <VPN客戶端IP>`，看是不是走 `docker0` 而不是預設閘道
+6. **有些服務通、有些不通** → 比對那幾台的差異（誰有跑 Docker？），不要先懷疑政策
+
+### 判斷「某個功能還在不在」
+
+- ❌ 查 config 物件（升版移除功能後，舊設定常常留著，API 照樣讀得到）
+- ✅ **測 port 有沒有在聽** + **CLI 有沒有這個指令**
 
 ---
 
