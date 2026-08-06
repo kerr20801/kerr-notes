@@ -1,3 +1,48 @@
+<!-- ═══════════════════════════════════════════════════════════════════
+     🛑 發布前必讀 —— 2026-08-05 更新，本文有一段已知錯誤，先修再發
+
+     〈2FA 能不能用，取決於「客戶端」而不是「IKE 版本」〉那節（約 L231–277，
+     以及 L531 檢查清單那條）把分界寫成「原生用戶端 vs FortiClient」——**這是錯的**。
+
+     2026-08-05 晚間受控實測（同一支手機、同一個 FortiClient、同一帳號、同一條隧道，
+     只改第二因素）證實：**失敗的那台手機從頭到尾都在跑 FortiClient**。
+     真正的分界是 **FortiClient 桌面版 vs 行動版**。
+
+       IKEv2 + 2FA + FortiClient 桌面版(macOS)  ✅  15:04:58 寄 OTP → 15:05:11 連上
+       IKEv2 + 2FA + FortiClient 行動版         ❌  eapuser 認證通過後 0.1~0.6s 拆掉
+                                                    第二因素事件 0 筆（email / 已綁定 FortiToken 皆同）
+
+     連帶要修的還有：
+       • 「怎麼從 log 分辨客戶端：看 fctuid」——**fctuid 不可靠**，phase 1 早期記錄
+         本來就不帶這欄位，缺席 ≠ 原生用戶端。這句要刪或改寫。
+       • 可補的新料：negotiate-timeout(預設30s) < two-factor-email-expiry(預設60s)
+         原廠預設自相矛盾；fortinet-notifications.com 中繼寄 3 次才到。
+
+     完整證據（11 次可重現紀錄 + 毫秒時序）在內部 Outline 該文 Part 4。
+     ✅ 2026-08-06 已收斂：MacBook + FortiClient + 2FA 實測成功
+        （IKEv2 09:22:40 / IKEv1 09:23:38，兩者皆 tunnel-up）。行動版確定不行。
+
+     ─────────────────────────────────────────────────────────────────
+     💡 2026-08-06 另有大量新素材可強化本文，見 Outline 該文 **Part 5**：
+
+     現在文章的主軸是「四種死法」。新素材讓它可以升級成一個更完整的論點：
+     **遷移的難處不在設定，而在於一個沒有共識的客戶端生態，
+       而且每個失敗的錯誤訊息都指向錯的方向。**
+
+       症狀                              你會以為        真因
+       no SA proposal chosen(cookie全0)  演算法不合      交換模式不同(iOS只送main)
+       gateway validation failed         PSK錯/憑證      身分識別型別不同(安卓送KEY_ID)
+       SA deleted 無原因/0.2s/OTP 0筆     逾時/帳密       行動版無2FA挑戰擴充
+
+     三個根因是「交換模式／身分識別型別／私有擴充有無」——IPsec 規格全都讓
+     實作者自選且無預設共識。SSL VPN 好用正是因為它沒有這些選項(走HTTPS、
+     TLS交握全球統一)。**IPsec 的彈性就是它的詛咒。**
+
+     還有一段方法論很適合收尾：本次盲試三輪(加演算法、關PFS、差點再加DH group)
+     全部無效，兩分鐘的 ike debug 直接給出答案 →
+     **改了參數而失敗方式一字不變 = 問題不在那個參數。**
+     ═══════════════════════════════════════════════════════════════════ -->
+
 # FortiOS 7.6 拿掉了 SSL VPN，我被迫遷到 IPSec —— 挖出「隧道通了但什麼都不通」的四種死法
 
 寫於 2026-08-04
@@ -227,6 +272,54 @@ cookies: 8d09e19f1a4222f4/0000000000000000
 **Windows 11 原生 VPN 沒有「Cisco IPSec」這種選項**。它只做 IKEv2、L2TP/IPSec（IKEv1 **main** mode）、SSTP、PPTP。所以 IKEv1 aggressive + XAuth 這種最常見的 FortiGate dial-up 設定，Windows 原生**永遠連不上**，只能裝 FortiClient 或改用 IKEv2。
 
 而 macOS 有 Cisco IPSec 選項，所以會出現「Mac 連得上、Windows 連不上」這種看起來很玄的狀況——其實是結構性差異，不是設定歪掉。
+
+### ⚠️ 2FA 能不能用，取決於「客戶端」而不是「IKE 版本」
+
+這條是實測撞出來的，而且**沒有任何錯誤訊息會告訴你原因**。
+
+在一條原生用戶端連得好好的 IKEv2 上，幫使用者開啟 2FA（Email OTP 或 FortiToken）之後——**立刻連不上**。log 長這樣：
+
+```
+Negotiate IPsec phase 1  status=success    ← EAP 走了好幾輪
+Negotiate IPsec phase 1  status=success
+Progress  IPsec phase 1  status=success
+IPsec phase 1 SA deleted                   ← 然後就沒了
+```
+
+沒有 `reason`、沒有 `xauthuser`、沒有指派 IP，**連 OTP 信都沒寄出去**。
+
+**根因**：標準 EAP-MSCHAPv2 **沒有「認證中途再挑戰一次」的機制**。FortiGate 想送第二因素挑戰時，原生用戶端不知道那是什麼，直接斷掉。
+
+FortiClient 之所以可以，是因為它有**專屬擴充**。在 FortiClient 的連線 log 裡看得到這一行：
+
+```
+ike 0:TUNNEL:NNNNN: FCT EAP 2FA extension vendor ID received
+```
+
+客戶端主動宣告「我會處理 2FA 挑戰」——原生用戶端不會送這個。
+
+**⚠️ 這裡最容易誤讀成「IKEv2 不能做 2FA」——不是。** 實測矩陣：
+
+| 組合 | 結果 |
+|---|---|
+| IKEv2 + 2FA + **FortiClient** | ✅ 可以（RADIUS 2FA，連線成功）|
+| IKEv2 + 2FA + **原生用戶端** | ❌ 不行 |
+| IKEv1 + 2FA + **FortiClient** | ✅ 可以 |
+
+**決定因素是客戶端，不是協定版本。** 兩個 IKE 版本在 FortiClient 下都能做 2FA；原生用戶端則兩者都不行。
+
+> 這點值得特別強調，因為很容易掉進一個推論陷阱：**拿「IKEv1 + FortiClient」跟「IKEv2 + 原生」相比**，看起來像是「IKEv1 能做 2FA、IKEv2 不能」，於是得出「IKEv1 比較安全」的結論。實際上那是**客戶端的差異被誤讀成協定的差異**——而 IKEv1 aggressive 還多背了「PSK 雜湊認證前外洩」這個 IKEv2 沒有的弱點。
+
+**所以真正的二選一是：**
+
+| 你要的 | 代價 |
+|---|---|
+| 原生用戶端（不裝軟體、手機開箱即用） | **不能有 2FA** |
+| 2FA | **所有裝置都要裝 FortiClient**（IKEv1/v2 皆可）|
+
+**怎麼從 log 分辨客戶端**：`event/vpn` 的 `fctuid` 欄位——有值是 FortiClient，`N/A` 是原生用戶端。診斷 2FA 問題時先看這個，免得拿不同客戶端的結果互相比較。
+
+**折衷做法**：同介面並存兩條 IKEv2——一條不帶 2FA 給原生用戶端日常用，另一條綁開了 2FA 的使用者群組給 FortiClient 用，需要碰敏感系統時才走後者。
 
 ### 好消息：同一個介面可以並存多條
 
@@ -480,6 +573,7 @@ Schema 的 `help` 欄位是最可靠的來源——比記憶、比部落格、�
 - [ ] 使用者群組欄位（IKEv1 XAuth 和 IKEv2 EAP 都用 `authusrgrp`）
 - [ ] IKEv2 用 EAP：`eap enable` + **`eap-identity send-request`**
 - [ ] DNS：`ipv4-dns-server1` + **`internal-domain-list`**（split tunnel 必要）
+- [ ] **要 2FA 就得用 FortiClient**（原生用戶端不支援第二因素挑戰——**跟 IKE 版本無關**，v1/v2 都一樣）
 - [ ] 內部 DNS 的 ACL / view 要涵蓋 VPN 池
 - [ ] **每項改完讀回來確認**（API 可能靜默失敗）
 
