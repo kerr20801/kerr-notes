@@ -130,4 +130,4 @@ FortiOS 7.4 Supported RFCs 的 Cryptography 分類列了將近 20 條 IKEv2 相�
 | DH Group 選多少 | 自家設備對打用 19/20/21，第三方/老設備保底用 14；別浪費力氣在 Group 14 vs 19 上，RFC 8784 才是真正的下一步 |
 | IKEv1 還要不要留 | 除非有老設備相容性需求，否則新隧道一律 IKEv2 |
 
-延伸閱讀：[IPsec VPN 實戰配置與避坑指南](ipsec_vpn_enterprise_guide.md)（Rekey 陷阱、GCM 配置細節）
+延伸閱讀：[IPsec VPN 實戰配置與避坑指南](ipsec_vpn_enterprise_guide.md)（Rekey 陷阱、GCM 配置細節）、[IKEv1 對 IKEv2 通訊機制與 CLI 逐項對照](ikev1-vs-ikev2-mechanics-cli.md)、[用 IPsec Aggregate 做安全的 Phase1 切換](ipsec-aggregate-safe-rollout.md)（怎麼把本文的建議實際搬上正式環境）

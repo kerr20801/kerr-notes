@@ -92,4 +92,4 @@ end
 
 ---
 
-延伸閱讀：[FortiGate 型號能撐多少 VPN——企業角度的容量與拓撲設計](fortigate-model-capacity-vpn-topology.md)（第五節有 IKEv1 未出現在官方 RFC 清單的佐證）、[同一個 AD 群組，IKEv1 連得上、IKEv2 連不上](2026-08-07-fortigate-ikev2-eap-ldap.md)（認證後端相容性的完整除錯過程）
+延伸閱讀：[FortiGate 型號能撐多少 VPN——企業角度的容量與拓撲設計](fortigate-model-capacity-vpn-topology.md)（第五節有 IKEv1 未出現在官方 RFC 清單的佐證）、[同一個 AD 群組，IKEv1 連得上、IKEv2 連不上](2026-08-07-fortigate-ikev2-eap-ldap.md)（認證後端相容性的完整除錯過程）、[用 IPsec Aggregate 做安全的 Phase1 切換](ipsec-aggregate-safe-rollout.md)（本文的 IKEv1→IKEv2 建議怎麼安全搬上正式環境）
