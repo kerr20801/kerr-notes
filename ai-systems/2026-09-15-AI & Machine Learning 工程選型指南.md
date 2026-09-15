@@ -1,4 +1,5 @@
-AI & Machine Learning 工程選型指南 (包含序列與變點分析)
+## AI & Machine Learning 工程選型指南 (包含序列與變點分析)
+```
 第一部分：傳統機器學習 (Traditional ML)
 💡 核心特徵： 處理「結構化表格數據（Logs、DB、統計指標）」的首選。推論極快（多數 CPU 即可跑）、具備高可解釋性，方便追溯審計。
 
